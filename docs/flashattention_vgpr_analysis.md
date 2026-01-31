@@ -32,68 +32,79 @@ The following tensors are **persistent across the entire KV loop**, creating lon
 
 ```python
 acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=fp32)
+```
 
+- `Shape: 128 × 128`
+- `Total elements: 16,384 fp32`
+- `Distributed across 512 threads:`
 
-----------------------------------------
-    Shape: 128 × 128
-
-    Total elements: 16,384 fp32
-
-    Distributed across 512 threads:
--------------------------------------------
-
-
+```
 16,384 / 512 = 32 fp32 values per thread
+```
 
-→ ~32 VGPRs per thread
+**→ ~32 VGPRs per thread** 
 
 This accumulator is:
-    initialized once
-    rescaled and updated in every KV iteration
-    never written back or cleared until the epilogue
+- initialized once
+- rescaled and updated in every KV iteration
+- never written back or cleared until the epilogue
 
-----------------------------------------------------------------------------------------
+---
 
-2. Online Softmax State (m_i, l_i)
-    m_i = tl.full([BLOCK_M], -inf, fp32)
-    l_i = tl.full([BLOCK_M], 1.0, fp32)
+### 2. Online Softmax State (m_i, l_i)
 
-    Total elements: 2 × 128 = 256 fp32
-    Per-thread share:
-        256 / 512 = 0.5 fp32 → rounded up
+```
+m_i = tl.full([BLOCK_M], -inf, fp32)
+l_i = tl.full([BLOCK_M], 1.0, fp32)
+```
 
-    → ~1 VGPR per thread
+- Total elements: 2 × 128 = 256 fp32
+- Per-thread share:
 
-    These values must remain live to correctly rescale the accumulator when a new maximum is encountered.
+```
+256 / 512 = 0.5 fp32 → rounded up
+```
 
-----------------------------------------------------------------------------------------
+**→ ~1 VGPR per thread**
 
-3. Query Fragment (q)
-    q = tl.load(q_ptrs)
+These values must remain live to correctly rescale the accumulator when a new maximum is encountered.
 
-    Shape: 128 × 128
-    Reused in every tl.dot(q, k) call
-    Triton typically promotes to fp32 fragments for dot products
+---
 
-    16,384 / 512 = 32 fp32 values per thread
+### 3. Query Fragment (q)
+```python
+q = tl.load(q_ptrs)
+```
 
+- Shape: 128 × 128
+- Reused in every tl.dot(q, k) call
+- Triton typically promotes to fp32 fragments for dot products
 
-    → ~32 VGPRs per thread
+```
+16,384 / 512 = 32 fp32 values per thread
+```
 
-----------------------------------------------------------------------------------------
+***→ ~32 VGPRs per thread***
 
-Peak Register Pressure Contributors
+---
 
-4. Score Accumulator (acc_s)
-    acc_s = tl.dot(q, k)
+### Peak Register Pressure Contributors
 
-    Shape: 128 × 128
-    Temporary, but overlaps in lifetime with acc, m_i, and q
+### 4. Score Accumulator (acc_s)
 
-    Contribution:
-        16,384 / 512 = 32 fp32 values per thread
+```python
+acc_s = tl.dot(q, k)
+```
 
-    → ~32 VGPRs per thread (peak)
+- Shape: 128 × 128
+- Temporary, but overlaps in lifetime with acc, m_i, and q
+
+- Contribution:
+```
+16,384 / 512 = 32 fp32 values per thread
+```
+
+***→ ~32 VGPRs per thread (peak)***
 
 Estimated VGPR Usage Per Thread
 | Component                   | VGPRs              |
@@ -105,63 +116,70 @@ Estimated VGPR Usage Per Thread
 | Pointers & control          | ~10–15             |
 | **Total (conservative)**    | **~110–120 VGPRs** |
 
-----------------------------------------------------------------------------------------
+---
 
-Mapping to AMD CDNA Hardware
+### Mapping to AMD CDNA Hardware
 
-Assumptions:
-    VGPRs per CU ≈ 65,536
-    Wavefront size = 64 threads
+#### Assumptions:
 
-VGPRs per wavefront:
-    120 VGPRs/thread × 64 threads = 7,680 VGPRs
+- VGPRs per CU ≈ 65,536
+- Wavefront size = 64 threads
 
-Maximum resident wavefronts per CU:
-    65,536 / 7,680 ≈ 8.5 → at most 8 wavefronts
 
+#### VGPRs per wavefront:
+```
+120 VGPRs/thread × 64 threads = 7,680 VGPRs
+```
+
+#### Maximum resident wavefronts per CU:
+
+```
+65,536 / 7,680 ≈ 8.5 → at most 8 wavefronts
+```
 
 After accounting for:
-    LDS usage
-    SGPR pressure
-    instruction constraints
+- LDS usage
+- SGPR pressure
+- instruction constraints
 
-Practical occupancy often drops to ~4–6 wavefronts per CU.
+Practical occupancy often drops to **~4–6 wavefronts per CU**.
 
-Why This Hurts AMD More Than NVIDIA
+**Why This Hurts AMD More Than NVIDIA**
 
 On NVIDIA GPUs:
-    Warp size = 32 threads
-    Same per-thread register usage
+- Warp size = 32 threads
+- Same per-thread register usage
 
+```
 120 × 32 = 3,840 registers per warp
+```
 
-
-This is half the per-scheduling-unit pressure, allowing more warps to remain resident and improving latency hiding.
+This is **half the per-scheduling-unit pressure**, allowing more warps to remain resident and improving latency hiding.
 
 The algorithm is the same; the architectural scaling is not.
 
-Implications
+---
 
-    The register pressure is algorithmic, not accidental
+#### Implications
 
-    Triton preserves the same online-softmax accumulator lifetime as the CUDA kernel
+- The register pressure is **algorithmic**, not accidental
+- Triton preserves the same online-softmax accumulator lifetime as the CUDA kernel
+- Wavefront-64 architectures amplify long-lived register state
+- Performance portability requires **architecture-aware restructuring**, not micro-optimizations
 
-    Wavefront-64 architectures amplify long-lived register state
+---
 
-    Performance portability requires architecture-aware restructuring, not micro-optimizations
+#### Potential Mitigation Directions (Not Solutions)
 
-Potential Mitigation Directions (Not Solutions)
-
-    Smaller BLOCK_M for wavefront-64 GPUs
-
-    Split-KV or partial-accumulator designs
-
-    Two-pass softmax variants for long sequences
-
-    Wave32-specialized kernels where supported
+- Smaller BLOCK_M for wavefront-64 GPUs
+- Split-KV or partial-accumulator designs
+- Two-pass softmax variants for long sequences
+- Wave32-specialized kernels where supported
 
 Each trades arithmetic intensity for improved occupancy.
 
-Conclusion
+---
 
-    FlashAttention’s design deliberately prioritizes bandwidth efficiency by keeping large accumulators and softmax state on-chip. On AMD GPUs, the combination of wavefront-64 execution and large persistent accumulators leads to sharp occupancy cliffs. Quantifying this effect helps guide future ROCm-optimized kernel designs.
+#### Conclusion
+
+FlashAttention’s design deliberately prioritizes bandwidth efficiency by keeping large accumulators and softmax state on-chip. On AMD GPUs, the combination of wavefront-64 execution and large persistent accumulators leads to sharp occupancy cliffs. Quantifying this effect helps guide future ROCm-optimized kernel designs.
