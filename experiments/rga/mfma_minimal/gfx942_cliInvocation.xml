@@ -1,0 +1,18 @@
+<DataModel>DataModel</DataModel>
+<ProgramOutputMetadata>
+    <Binary>C:\Users\ks854\Documents\RadeonGPUAnalyzer\Projects\260203-032139\Output\Clone0\gfx942_codeobj.bin</Binary>
+    <InputFile>
+        <Path>C:/Users/ks854/Documents/RadeonGPUAnalyzer/Projects/260203-032139/Clone0/src.cl</Path>
+        <Entry>
+            <Name>mfma_test</Name>
+            <Type>OpenCL_Kernel</Type>
+            <Output>
+                <TargetGPU>gfx942</TargetGPU>
+                <ISA>C:\Users\ks854\Documents\RadeonGPUAnalyzer\Projects\260203-032139\Output\Clone0\gfx942_mfma_test_disassem.txt</ISA>
+                <CSV_ISA>C:\Users\ks854\Documents\RadeonGPUAnalyzer\Projects\260203-032139\Output\Clone0\gfx942_mfma_test_disassem.csv</CSV_ISA>
+                <ResourceUsage>C:\Users\ks854\Documents\RadeonGPUAnalyzer\Projects\260203-032139\Output\Clone0\gfx942_mfma_test_resourceUsage.csv</ResourceUsage>
+                <LiveReg>C:\Users\ks854\Documents\RadeonGPUAnalyzer\Projects\260203-032139\Output\Clone0\gfx942_mfma_test_livereg.txt</LiveReg>
+            </Output>
+        </Entry>
+    </InputFile>
+</ProgramOutputMetadata>
